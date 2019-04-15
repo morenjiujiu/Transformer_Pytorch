@@ -14,8 +14,7 @@ Transformer的pytorch实现 (attention-is-all-you-need)
 ('step: ', 900, '| time: 11.46', '| loss: 203.111', '| target: ', '23/Sep/2012<EOS>', '| inference: ', '23/Sep/2018<EOS>')
 
 
-
-##Referance
+Referance
 - 
 - https://github.com/MorvanZhou/NLP-Tutorials/blob/master/Transformer.py tensorflow版本
 - https://juejin.im/post/5b9f1af0e51d450e425eb32d#comment 原理讲解的很好
