@@ -16,23 +16,22 @@ class ScaledDotProductAttention(nn.Module):
         k: Keys张量，形状为[B, L_k, D_k]
         v: Values张量，形状为[B, L_v, D_v]
         mask: Masking张量，形状为[B, L_q, L_k]
-        其中D_q=D_k=D_v
+        其中D_q=D_k=D_v, L_q=L_q=L_v
     :return
         attention张量
     """
     def __init__(self,dropout_rate):
         super(ScaledDotProductAttention, self).__init__()
-        self.softmax = nn.Softmax(dim=2) #todo 为啥
+        self.softmax = nn.Softmax(dim=2)
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self,q,k,v,mask):
         dk = k.size()[-1]  # k的dim
         score = torch.bmm(q, k.transpose(1,2)) * np.sqrt(dk)  #这里score 的shape为[B,L_q,L_k]
         if mask is not None:
-            mask= mask.repeat(score.size()[0]/mask.size()[0], 1, 1)
-            score = score.masked_fill_(mask, -np.inf)
-            # score = torch.where(mask, score, torch.full(score.size(), -np.inf))
+            mask= mask.repeat(score.size()[0]/mask.size()[0], 1, 1)  #mask和score大小要相同
 
+            score = score.masked_fill_(mask, -np.inf)
             #masked_fill_( mask, value) 在mask的值为1的地方用value填充。mask的元素个数需和本tensor相同，但尺寸可以不同。
             #mask是0-1的ByteTensor
 
@@ -46,10 +45,8 @@ class ScaledDotProductAttention(nn.Module):
 class MultiHeadAttention(nn.Module):
     """
     :param
-        model_dim 就是k的dim  dk=dq=dv=dmodel
-        n_head heads的数量
-        dropout_rate
-
+        model_dim 就是k的dim  D_k=D_q=D_v=model_dim
+        n_head 是heads的数量
     :return multi_head_attention张量
     """
     def __init__(self, model_dim, n_head, dropout_rate):
@@ -67,9 +64,9 @@ class MultiHeadAttention(nn.Module):
 
 
     def forward(self, query, key, value, mask=None):
-        q = self.linear_q(query)  # [b, lq, h_dim*h]
-        k = self.linear_k(key)  # [b, lk, h_dim*h]
-        v = self.linear_v(value)  # [b, lv, h_dim*h]
+        q = self.linear_q(query)  # [B, L_q, head_dim*n_head]
+        k = self.linear_k(key)
+        v = self.linear_v(value)
         batch_size=k.size()[0]
 
         q_ = q.view(batch_size * self.n_head, -1, self.head_dim)
@@ -93,7 +90,7 @@ class PositionWiseFFN(nn.Module):
         self.dropout=nn.Dropout(dropout_rate)
 
     def forward(self,x):
-        x=x.transpose(1,2)  #todo 这里为什么
+        x=x.transpose(1,2) #todo
         o=F.relu(self.conv1(x))
         o=self.conv2(o)
         o=self.dropout(o)
@@ -141,11 +138,10 @@ class Transformer(nn.Module):
         self.n_layer = n_layer
         self.n_head = n_head
         self.dropout_rate = dropout_rate
-        self.padding_idx = torch.tensor(padding_idx)  #这个是干啥的 todo
+        self.padding_idx = torch.tensor(padding_idx)
         self.n_vocab=n_vocab
 
         self.embeddings =torch.nn.Embedding(n_vocab, embedding_dim=model_dim)
-        # self.embeddings = tf.Variable(tf.random_normal((n_vocab, model_dim), 0., 0.01))
         self.build_encoder=Encoder(model_dim, n_head, dropout_rate, n_layer)
         self.build_decoder=Decoder(model_dim, n_head, dropout_rate, n_layer)
         self.linear=nn.Linear(model_dim, n_vocab)
@@ -168,10 +164,12 @@ class Transformer(nn.Module):
         return torch.tensor(torch.unsqueeze(mask, dim=1) * torch.unsqueeze(mask, dim=2), dtype=torch.uint8)
 
 
-    def output_mask(self, seqs):
+    def output_mask(self, seqs):  #sequence mask
         batch_size, seq_len = seqs.size()
-        mask = torch.triu(torch.ones((self.max_len, self.max_len), dtype=torch.uint8), diagonal=1)
+        #下三角矩阵，下面为1
+        mask = ~torch.triu(torch.ones((self.max_len, self.max_len), dtype=torch.uint8), diagonal=1)
         mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
+        # print "mask",mask
         return mask
 
 
@@ -182,12 +180,9 @@ class Transformer(nn.Module):
 
         encoded_z = self.build_encoder(x_embedded, mask=self.pad_mask(tfx))
         # print "encoded_z.size",encoded_z.size()
-
         decoded_z = self.build_decoder(y_embedded, encoded_z, mask=self.output_mask(tfy[:, :-1]))
 
-
         logits = self.linear(decoded_z)
-
         return logits
 
 
@@ -230,22 +225,18 @@ for t in range(2000):
     loss = criterion(logits.transpose(1,2), by_[:, 1:])
     # loss = criterion(logits, by_[:, 1:])
 
-
     if t % 50==0:
         logits_=model(bx_[:1, :], by_[:1, :])
-
-        print(t, loss.item())
 
         t1 = time.time()
         print(
             "step: ", t,
             "| time: %.2f" % (t1-t0),
-            "| loss: %.3f" % loss,
+            "| loss: %.3f" % loss.item(),
             "| target: ", "".join([i2v[i] for i in by[0, 1:] if i != v2i["<PAD>"]]),
             "| inference: ", "".join([i2v[i] for i in np.argmax(logits_[0].detach().numpy(), axis=1) if i != v2i["<PAD>"]]),
         )
         t0 = t1
-
 
     optimizer.zero_grad()
     loss.backward()
@@ -255,7 +246,7 @@ for t in range(2000):
 
 #prediction
 with torch.no_grad():
-    src_seq = "19-08-30"
+    src_seq = "05-08-30"
     src_pad = utils.pad_zero(np.array([v2i[v] for v in src_seq])[None, :], MAX_LEN)
     tgt_seq = "<GO>"
     tgt = utils.pad_zero(np.array([v2i[tgt_seq], ])[None, :], MAX_LEN + 1)

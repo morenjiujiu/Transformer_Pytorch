@@ -8,9 +8,7 @@ Transformer的pytorch实现 (attention-is-all-you-need)
 
 ## 程序执行
 - python Transformer.py 可以看到如下过程
-> (850, 211.3482208251953)  
-('step: ', 850, '| time: 10.69', '| loss: 211.348', '| target: ', '16/Feb/2010<EOS>', '| inference: ', '16/Feb/2016<EOS>')  
-(900, 203.11134338378906)  
+> ('step: ', 850, '| time: 10.69', '| loss: 211.348', '| target: ', '16/Feb/2010<EOS>', '| inference: ', '16/Feb/2016<EOS>')  
 ('step: ', 900, '| time: 11.46', '| loss: 203.111', '| target: ', '23/Sep/2012<EOS>', '| inference: ', '23/Sep/2018<EOS>')
 
 
