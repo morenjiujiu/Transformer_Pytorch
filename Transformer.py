@@ -16,7 +16,7 @@ class ScaledDotProductAttention(nn.Module):
         k: Keys张量，形状为[B, L_k, D_k]
         v: Values张量，形状为[B, L_v, D_v]
         mask: Masking张量，形状为[B, L_q, L_k]
-        其中D_q=D_k=D_v, L_q=L_q=L_v
+        其中D_q=D_k=D_v, L_q=L_k=L_v
     :return
         attention张量
     """
@@ -55,27 +55,34 @@ class MultiHeadAttention(nn.Module):
         self.model_dim=model_dim
         self.n_head=n_head
         self.head_dim = self.model_dim // self.n_head
+
         self.linear_k = nn.Linear(self.model_dim, self.head_dim * self.n_head) #size of each input sample, size of each output sample
         self.linear_v = nn.Linear(self.model_dim, self.head_dim * self.n_head) #这里的输出变成了多层
         self.linear_q = nn.Linear(self.model_dim, self.head_dim * self.n_head)
-        self.linear_final=nn.Linear(self.head_dim * self.n_head, self.model_dim) #todo
+
+        self.linear_final=nn.Linear(self.head_dim * self.n_head, self.model_dim)
         self.dropout = nn.Dropout(dropout_rate)
         self.scaled_dot_product_attention = ScaledDotProductAttention(dropout_rate)
 
 
     def forward(self, query, key, value, mask=None):
-        q = self.linear_q(query)  # [B, L_q, head_dim*n_head]
+        # 将q,k,v经过线性映射后，分成n_head份，对每一份分别进行scaled_dot_product_attention
+        # 这里的n_head 是在model_dim上进行切分的，因此进入到scaled_dot_product_attention的dk=model_dim/n_head
+        q = self.linear_q(query)  #[B, L_q, head_dim*n_head]
         k = self.linear_k(key)
         v = self.linear_v(value)
         batch_size=k.size()[0]
 
-        q_ = q.view(batch_size * self.n_head, -1, self.head_dim)
+        q_ = q.view(batch_size * self.n_head, -1, self.head_dim) #if batch=1: q(1,12,32) q_(4,12,8)
         k_ = k.view(batch_size * self.n_head, -1, self.head_dim)
         v_ = v.view(batch_size * self.n_head, -1, self.head_dim)
+        # print "query.size",query.size(),"q.size",q.size(),"q_.size",q_.size()
 
-        context = self.scaled_dot_product_attention(q_, k_, v_, mask)
 
-        o = context.view(batch_size, -1, self.head_dim * self.n_head)
+        context = self.scaled_dot_product_attention(q_, k_, v_, mask) #(4,12,8)
+
+        #把scaled_dot_product_attention的结果concat起来，经过一个线性映射
+        o = context.view(batch_size, -1, self.head_dim * self.n_head) #(1,12,32)
         o = self.linear_final(o)
         o = self.dropout(o)
         return o
@@ -108,7 +115,7 @@ class Encoder(nn.Module):
 
     def forward(self, xz, mask):
         for n in range(self.n_layer):
-            xz = self.lnorm(self.multi_head(xz, xz, xz, mask) + xz)
+            xz = self.lnorm(self.multi_head(xz, xz, xz, mask) + xz) #Add & Norm
             xz = self.lnorm(self.position_wise_ffn(xz).transpose(1, 2)  + xz)
         return xz
 
@@ -124,7 +131,7 @@ class Decoder(nn.Module):
 
     def forward(self, xz, yz, mask):
         for n in range(self.n_layer):
-            yz = self.lnorm(self.multi_head(yz, yz, yz, mask) + yz)
+            yz = self.lnorm(self.multi_head(yz, yz, yz, mask) + yz) #Add & Norm
             yz = self.lnorm(self.multi_head(yz, xz, xz, None) + yz)
             yz = self.lnorm(self.position_wise_ffn(yz).transpose(1, 2)  + yz)
         return yz
@@ -146,6 +153,7 @@ class Transformer(nn.Module):
         self.build_decoder=Decoder(model_dim, n_head, dropout_rate, n_layer)
         self.linear=nn.Linear(model_dim, n_vocab)
         self.dropout=nn.Dropout(dropout_rate)
+        # self.softmax = nn.Softmax(dim=2)
 
 
     def position_embedding(self):
@@ -169,7 +177,6 @@ class Transformer(nn.Module):
         #下三角矩阵，下面为1
         mask = ~torch.triu(torch.ones((self.max_len, self.max_len), dtype=torch.uint8), diagonal=1)
         mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
-        # print "mask",mask
         return mask
 
 
@@ -182,7 +189,9 @@ class Transformer(nn.Module):
         # print "encoded_z.size",encoded_z.size()
         decoded_z = self.build_decoder(y_embedded, encoded_z, mask=self.output_mask(tfy[:, :-1]))
 
-        logits = self.linear(decoded_z)
+        logits= self.linear(decoded_z)
+        # logits= self.softmax(logits)
+
         return logits
 
 
@@ -200,8 +209,8 @@ N_HEAD = 4
 DROPOUT_RATE = 0.1
 
 model = Transformer(MODEL_DIM, MAX_LEN, N_LAYER, N_HEAD, len(vocab), DROPOUT_RATE)
-criterion = nn.CrossEntropyLoss(size_average=False)
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+criterion = nn.CrossEntropyLoss(reduction='sum' ) #size_average=False
+optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
 
 
 
